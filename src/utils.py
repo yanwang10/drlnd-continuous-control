@@ -1,10 +1,38 @@
 import numpy as np
 from collections import deque, namedtuple
-import copy, time, random
+import copy, time, random, json, os
 import torch
 import torch.nn as nn
+from tensorboardX import SummaryWriter
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+class ConfigurableObject:
+    """
+    A base class of all objects that could be configured with a flattened dict.
+    The values could be objects or functions/lambdas.
+    """
+    def __init__(self, config, default={}):
+        self.config = copy.deepcopy(config)
+        self.default = copy.deepcopy(default)
+
+    def has(self, k):
+        return k in self.config or k in self.default
+
+    def get(self, k):
+        if k in self.config:
+            return self.config[k]
+        elif k in self.default:
+            return self.default[k]
+        else:
+            return None
+
+    def print_config(self):
+        config = self.default
+        for k in self.config:
+            config[k] = self.config[k]
+        print('Configs: ', json.dumps(config, indent=4))
+
 
 class SmoothAccumulator:
     """
@@ -91,7 +119,6 @@ class ReplayBuffer:
         rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
         next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
         dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
-
         return (states, actions, rewards, next_states, dones)
 
     def __len__(self):
@@ -102,21 +129,23 @@ class ReplayBuffer:
 class OUNoise:
     """
     Ornstein-Uhlenbeck process.
-    Copied from Udacity DDPG mini project:
+    Based on the implementation in Udacity DDPG mini project:
     https://github.com/udacity/deep-reinforcement-learning/blob/d6cb43c1b11b1d55c13ac86d6002137c7b880c15/ddpg-pendulum/ddpg_agent.py
     """
 
-    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2, discount=1.0):
         """Initialize parameters and noise process."""
         self.mu = mu * np.ones(size)
         self.theta = theta
         self.sigma = sigma
         self.seed = random.seed(seed)
+        self.discount = discount
         self.reset()
 
     def reset(self):
         """Reset the internal state (= noise) to mean (mu)."""
         self.state = copy.copy(self.mu)
+        self.coef = 1.
         # The first several samples are highly biased so we skip them.
         for _ in range(10):
             self.sample()
@@ -126,7 +155,9 @@ class OUNoise:
         x = self.state
         dx = self.theta * (self.mu - x) + self.sigma * np.array([random.random() for i in range(len(x))])
         self.state = x + dx
-        return self.state
+        self.coef *= self.discount
+        return self.state * self.coef
+
 
 def layer_init(layer, w_scale=0.1):
     """
@@ -137,3 +168,50 @@ def layer_init(layer, w_scale=0.1):
     layer.weight.data.mul_(w_scale)
     nn.init.constant_(layer.bias.data, 0)
     return layer
+
+
+def Train(env, agent, config):
+    
+    # Copy the configs.
+    action_size = config['action_size']
+    state_size = config['state_size']
+    seed = config['seed']
+    batch_num = config['batch_num']
+    max_step_num = config['max_step_num']
+    max_episode_num = config['max_episode_num']
+    learn_interval = config['learn_interval']
+    
+    # Prepare the utilities.
+    os.makedirs(config['model_dir'], exist_ok=True)
+    os.makedirs(config['log_dir'], exist_ok=True)
+    # tf_logger = SummaryWriter(log_dir=log_dir)/
+    
+    
+    buffer = ReplayBuffer(config['buffer_size'], batch_num, seed)
+    noise = OUNoise(action_size, seed, discount=config['noise_discount'])
+    logger = RLTrainingLogger(config['window_size'])
+    
+    # The main training process.
+    total_step_num = 0
+    total_episode_num = 0
+    
+    while total_step_num < max_step_num and total_episode_num < max_episode_num:
+        # Start an episode
+        state = env.reset()
+        done = False
+        logger.episode_begin()
+        episode_rewards = []
+        while not done:
+            action = agent.act(state)
+            action += noise.sample()
+            next_state, reward, done = env.step(action)
+            # print('Interacting: next_state.shape =', next_state.shape)
+            total_step_num += 1
+            episode_rewards.append(reward)
+            buffer.add(state, action, reward, next_state, done)
+            if len(buffer) > batch_num and total_step_num % learn_interval == 0:
+                agent.learn(buffer.sample())
+        logger.episode_end(sum(episode_rewards))
+        total_episode_num += 1
+
+        
