@@ -80,6 +80,8 @@ class RLTrainingLogger:
         t, smooth_t = self.time_log.get_latest_record()
         print('\rEpisode %4d: reward = %.3f (%.3f), time = %.2fs (%.2fs)' %
               (self._episode_count, r, smooth_r, t, smooth_t), end='')
+        if self._episode_count % 20 == 0:
+            print('')
 
     def get_smooth_rewards(self):
         return self.reward_log.get_all_records()[1]
@@ -157,17 +159,6 @@ class OUNoise:
         self.state = x + dx
         self.coef *= self.discount
         return self.state * self.coef
-
-
-def layer_init(layer, w_scale=0.1):
-    """
-    Initialize the parameters (weights and biases) of a fully-connected layer.
-    Copied from https://github.com/ShangtongZhang/DeepRL/blob/3437ddfbe0ca7e4d57f4753f959f01d34091794e/deep_rl/network/network_utils.py
-    """
-    nn.init.orthogonal_(layer.weight.data)
-    layer.weight.data.mul_(w_scale)
-    nn.init.constant_(layer.bias.data, 0)
-    return layer
 
 
 def Train(env, agent, config):
