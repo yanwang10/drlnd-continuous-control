@@ -51,6 +51,7 @@ class EnvWrapper:
             obs, reward, done, _ = self.env.step(action)
             obs = self.transform_obs(obs)
             done = done | self.this_episode_len >= self.max_episode_len
+            # print('action =', action, '\tobs =', obs, '\treward =', reward)
             return obs, reward, done
         elif self.env_type == UNITY:
             env_info = self.env.step(action)[self.brain_name]

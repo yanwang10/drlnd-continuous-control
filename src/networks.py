@@ -6,28 +6,32 @@ def hidden_init(layer):
     fan_in = layer.weight.data.size()[0]
     lim = 1. / np.sqrt(fan_in)
     return (-lim, lim)
+    
+def layer_init(layer, w_scale=1.0):
+    """
+    Copied from https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/network/network_utils.py
+    """
+    nn.init.orthogonal_(layer.weight.data)
+    layer.weight.data.mul_(w_scale)
+    nn.init.constant_(layer.bias.data, 0)
+    return layer
 
 class BasicNetwork(nn.Module):
     def __init__(self, in_dim, out_dim, hidden=[], nonlinear=None, seed=13173):
         super(BasicNetwork, self).__init__()
         dims = [in_dim] + hidden + [out_dim]
         self.layers = nn.ModuleList(
-            [nn.Linear(dims[i], dims[i + 1]) for i in range(len(dims) - 1)])
+            [layer_init(nn.Linear(dims[i], dims[i + 1])) for i in range(len(dims) - 1)])
         self.nonlinear = nonlinear
         self.seed = torch.manual_seed(seed)
     
-    def reset_parameters(self):
-        print("calling reset_parameters()")
-        for layer in self.layers:
-            layer.weight.data.uniform_(*hidden_init(layer))
+    # def reset_parameters(self):
+    #     print("calling reset_parameters()")
+    #     for layer in self.layers:
+    #         layer.weight.data.uniform_(*hidden_init(layer))
     
     def forward(self, x):
-        # for layer in self.layers:
-        #     x = layer(x)
-        #     if self.nonlinear:
-        #         x = self.nonlinear(x)
-        for i, layer in enumerate(self.layers):
-            # print('forwarding %d of %d layers' % (i + 1, len(self.layers)))
+        for layer in self.layers:
             x = layer(x)
             if self.nonlinear:
                 x = self.nonlinear(x)
@@ -38,7 +42,7 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         assert(len(hidden) > 0)
         self.feature = BasicNetwork(in_dim, hidden[-1], hidden[:-1], F.relu, seed)
-        self.output = BasicNetwork(hidden[-1], out_dim, nonlinear=F.relu, seed=seed)
+        self.output = BasicNetwork(hidden[-1], out_dim, seed=seed)
         self.out_low, self.out_high = out_range
         assert((self.out_low is None) == (self.out_high is None))
         

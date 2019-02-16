@@ -5,6 +5,8 @@ from env_wrapper import EnvWrapper
 from ddpg import DDPGAgent
 from utils import *
 
+np.set_printoptions(precision=3)
+
 pendulum = gym.make('Pendulum-v0')
 env = EnvWrapper(gym_env=pendulum, max_episode_len=300)
 config = {
@@ -15,22 +17,23 @@ config = {
     'out_high': np.asscalar(pendulum.action_space.high),
     
     # Configs for the agent.
-    'tau': 1e-2,
-    'gamma': 0.95,
-    'actor_hidden': [8, 8],
-    'actor_lr': 1e-2,
-    'critic_hidden': [16, 16],
-    'critic_lr': 1e-2,
+    'tau': 1e-4,
+    'gamma': 0.96,
+    'actor_hidden': [64, 64, 64],
+    'actor_lr': 1e-3,
+    'critic_hidden': [64, 64, 64],
+    'critic_lr': 1e-4,
+    'action_repeat': 3,
     
     # Configs for the training process.
-    'noise_discount': 0.9996,
+    'noise_discount': 0.9997,
     'seed': 1317317,
     'buffer_size': 1000 * 300,
-    'batch_num': 64,
+    'batch_num': 32,
     'model_dir': './saved_model',
-    'max_episode_num': 2000,
-    'max_step_num': 2000 * 300,
-    'learn_interval': 16,
+    'max_episode_num': 3000,
+    'max_step_num': 3000 * 300,
+    'learn_interval': 1,
     
     # Configs for logging.
     'log_dir': './logs',

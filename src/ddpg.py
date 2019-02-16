@@ -19,7 +19,8 @@ class DDPGAgent:
         super(DDPGAgent, self).__init__()
         self.tau = config.get('tau')
         self.gamma = config.get('gamma')
-        state_size = config.get('state_size')
+        action_repeat = config.get('action_repeat')
+        state_size = config.get('state_size') * action_repeat
         action_range = [config.get('out_low'), config.get('out_high')]
         action_size = config.get('action_size')
         seed = config.get('seed')

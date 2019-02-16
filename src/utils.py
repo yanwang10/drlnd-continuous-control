@@ -173,13 +173,16 @@ def layer_init(layer, w_scale=0.1):
 def Train(env, agent, config):
     
     # Copy the configs.
+    action_repeat = config['action_repeat']
     action_size = config['action_size']
-    state_size = config['state_size']
+    state_size = config['state_size'] * action_repeat
     seed = config['seed']
     batch_num = config['batch_num']
     max_step_num = config['max_step_num']
     max_episode_num = config['max_episode_num']
     learn_interval = config['learn_interval']
+    out_low = config['out_low']
+    out_high = config['out_high']
     
     # Prepare the utilities.
     os.makedirs(config['model_dir'], exist_ok=True)
@@ -195,23 +198,33 @@ def Train(env, agent, config):
     total_step_num = 0
     total_episode_num = 0
     
+    get_repeated_state = lambda states: np.concatenate(states[-1 - action_repeat:-1], 1)
+    get_repeated_next_state = lambda states: np.concatenate(states[-action_repeat:], 1)
+    
     while total_step_num < max_step_num and total_episode_num < max_episode_num:
         # Start an episode
         state = env.reset()
         done = False
         logger.episode_begin()
+        episode_states = [state for _ in range(action_repeat)]
         episode_rewards = []
         while not done:
-            action = agent.act(state)
+            action = agent.act(get_repeated_next_state(episode_states))
             action += noise.sample()
-            next_state, reward, done = env.step(action)
+            action = np.clip(action, a_min=out_low, a_max=out_high)
+            for _ in range(action_repeat):
+                next_state, reward, done = env.step(action)
+                total_step_num += 1
+                episode_states.append(next_state)
+                episode_rewards.append(reward)
             # print('Interacting: next_state.shape =', next_state.shape)
-            total_step_num += 1
-            episode_rewards.append(reward)
-            buffer.add(state, action, reward, next_state, done)
+            buffer.add(
+                get_repeated_state(episode_states),
+                action,
+                sum(episode_rewards[-action_repeat:]),
+                get_repeated_next_state(episode_states),
+                done)
             if len(buffer) > batch_num and total_step_num % learn_interval == 0:
                 agent.learn(buffer.sample())
         logger.episode_end(sum(episode_rewards))
         total_episode_num += 1
-
-        
