@@ -23,7 +23,7 @@ episodes.
 The dependencies of the projects in this Nanodegree are listed in this
 [document](https://github.com/udacity/deep-reinforcement-learning#dependencies)
 from Udacity. As for this specific project,
-[here](https://github.com/udacity/deep-reinforcement-learning/tree/master/p1_navigation)
+[here](https://github.com/udacity/deep-reinforcement-learning/tree/master/p2_continuous-control)
 is the repository containing the instruction of additional set-ups and the
 starter code. We don't need to actually install Unity since the enviornment used
 in this project is already provided with a pre-built Unity app.
