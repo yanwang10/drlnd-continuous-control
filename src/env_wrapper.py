@@ -12,6 +12,7 @@ class EnvWrapper:
         self.max_episode_len = max_episode_len
         self.this_episode_len = 0
         self.env = None
+        self.cur_state = None
         if gym_env:
             print('Using gym env')
             self.env = gym_env
@@ -23,6 +24,9 @@ class EnvWrapper:
             self.env_type = UNITY
         else:
             raise NotImplementedError
+    
+    def get_current_state(self):
+        return self.cur_state
 
     def transform_obs(self, obs):
         if self.env_type == GYM:
@@ -31,6 +35,9 @@ class EnvWrapper:
             obs = obs.reshape(1, -1)
             return obs
         elif self.env_type == UNITY:
+            if len(obs.shape) == 1:
+                return np.expand_dims(obs, axis=0)
+            obs = obs.reshape(1, -1)
             return obs
         else:
             raise NotImplementedError
@@ -38,28 +45,28 @@ class EnvWrapper:
     def reset(self):
         self.this_episode_len = 0
         if self.env_type == GYM:
-            return self.transform_obs(self.env.reset())
+            self.cur_state = self.transform_obs(self.env.reset())
         elif self.env_type == UNITY:
             env_info = self.env.reset(train_mode=True)[self.brain_name]
-            return env_info.vector_observations[0]
+            self.cur_state = self.transform_obs(env_info.vector_observations[0])
         else:
             raise NotImplementedError
+        return self.get_current_state()
 
     def step(self, action):
         self.this_episode_len += 1
         if self.env_type == GYM:
             obs, reward, done, _ = self.env.step(action)
-            obs = self.transform_obs(obs)
+            self.cur_state = self.transform_obs(obs)
             done = done | self.this_episode_len >= self.max_episode_len
-            # print('action =', action, '\tobs =', obs, '\treward =', reward)
-            return obs, reward, done
+            return self.cur_state, reward, done
         elif self.env_type == UNITY:
             env_info = self.env.step(action)[self.brain_name]
             obs = env_info.vector_observations[0]
             reward = env_info.rewards[0]
             done = env_info.local_done[0]
-            obs = self.transform_obs(obs)
+            self.cur_state = self.transform_obs(obs)
             done = done | self.this_episode_len >= self.max_episode_len
-            return obs, reward, done
+            return self.cur_state, reward, done
         else:
             raise NotImplementedError

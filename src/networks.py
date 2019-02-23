@@ -7,7 +7,7 @@ def hidden_init(layer):
     lim = 1. / np.sqrt(fan_in)
     return (-lim, lim)
     
-def layer_init(layer, w_scale=1.0):
+def layer_init(layer, w_scale):
     """
     Copied from https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/network/network_utils.py
     """
@@ -17,11 +17,11 @@ def layer_init(layer, w_scale=1.0):
     return layer
 
 class BasicNetwork(nn.Module):
-    def __init__(self, in_dim, out_dim, hidden=[], nonlinear=None, seed=13173):
+    def __init__(self, in_dim, out_dim, hidden=[], nonlinear=None, seed=13173, init_weight_scale=1.0):
         super(BasicNetwork, self).__init__()
         dims = [in_dim] + hidden + [out_dim]
         self.layers = nn.ModuleList(
-            [layer_init(nn.Linear(dims[i], dims[i + 1])) for i in range(len(dims) - 1)])
+            [layer_init(nn.Linear(dims[i], dims[i + 1]), init_weight_scale) for i in range(len(dims) - 1)])
         self.nonlinear = nonlinear
         self.seed = torch.manual_seed(seed)
     
@@ -38,11 +38,11 @@ class BasicNetwork(nn.Module):
         return x
 
 class ActorNetwork(nn.Module):
-    def __init__(self, in_dim, out_dim, hidden=[], out_range=(None,None), seed=13173):
+    def __init__(self, in_dim, out_dim, hidden=[], out_range=(None,None), seed=13173, init_weight_scale=1.0):
         super(ActorNetwork, self).__init__()
         assert(len(hidden) > 0)
-        self.feature = BasicNetwork(in_dim, hidden[-1], hidden[:-1], F.relu, seed)
-        self.output = BasicNetwork(hidden[-1], out_dim, seed=seed)
+        self.feature = BasicNetwork(in_dim, hidden[-1], hidden[:-1], F.relu, seed, init_weight_scale)
+        self.output = BasicNetwork(hidden[-1], out_dim, seed=seed, init_weight_scale=init_weight_scale)
         self.out_low, self.out_high = out_range
         assert((self.out_low is None) == (self.out_high is None))
         
@@ -56,11 +56,11 @@ class ActorNetwork(nn.Module):
         return x
 
 class CriticNetwork(nn.Module):
-    def __init__(self, in_dim, out_dim=1, hidden=[], seed=13173):
+    def __init__(self, in_dim, out_dim=1, hidden=[], seed=13173, init_weight_scale=1.0):
         super(CriticNetwork, self).__init__()
         assert(len(hidden) > 0)
-        self.feature = BasicNetwork(in_dim, hidden[-1], hidden[:-1], F.relu, seed)
-        self.output = BasicNetwork(hidden[-1], out_dim, seed=seed)
+        self.feature = BasicNetwork(in_dim, hidden[-1], hidden[:-1], F.relu, seed, init_weight_scale)
+        self.output = BasicNetwork(hidden[-1], out_dim, seed=seed, init_weight_scale=init_weight_scale)
         
     def forward(self, x):
         # print('forwarding critic feature')

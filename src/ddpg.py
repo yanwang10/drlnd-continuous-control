@@ -4,19 +4,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from networks import *
+from .networks import *
 from torchsummary import summary
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class DDPGAgent:
+class DDPGAgent(object):
     """
     Implementation of DDPG algorithm described in this paper:
     Continuous Control with Deep Reinforcement Learning
     https://arxiv.org/pdf/1509.02971.pdf
     """
     def __init__(self, config):
-        super(DDPGAgent, self).__init__()
         self.tau = config.get('tau')
         self.gamma = config.get('gamma')
         action_repeat = config.get('action_repeat')
@@ -26,12 +25,14 @@ class DDPGAgent:
         seed = config.get('seed')
         actor_hidden = config.get('actor_hidden')
         critic_hidden = config.get('critic_hidden')
+        init_weight_scale = config.get('init_weight_scale')
+        self.grad_clip = config.get('grad_clip')
         self.q_local = CriticNetwork(
-            state_size + action_size, action_size, critic_hidden, seed=seed).to(device)
+            state_size + action_size, 1, critic_hidden, seed=seed, init_weight_scale=init_weight_scale).to(device)
         summary(self.q_local, (state_size + action_size,))
         self.q_optimizer = optim.Adam(self.q_local.parameters(), lr=config.get('critic_lr'))
         self.mu_local = ActorNetwork(
-            state_size, 1, actor_hidden, action_range, seed).to(device)
+            state_size, action_size, actor_hidden, action_range, seed, init_weight_scale=init_weight_scale).to(device)
         summary(self.mu_local, (state_size,))
         self.mu_optimizer = optim.Adam(self.mu_local.parameters(), lr=config.get('actor_lr'))
 
@@ -40,16 +41,13 @@ class DDPGAgent:
         # So we have to create new networks with the same structure and copy the
         # weights.
         self.q_target = CriticNetwork(
-            state_size + action_size, 1, critic_hidden, seed).to(device)
+            state_size + action_size, 1, critic_hidden).to(device)
         self.q_target.load_state_dict(self.q_local.state_dict())
         self.mu_target = ActorNetwork(
-            state_size, action_size, actor_hidden,
-            out_range=action_range, seed=seed).to(device)
+            state_size, action_size, actor_hidden, out_range=action_range).to(device)
         self.mu_target.load_state_dict(self.mu_local.state_dict())
 
     def act(self, state):
-        if type(state) == dict:
-            state = state.get('ReacherBrain')
         state = torch.from_numpy(state).float().to(device)
         self.mu_local.eval()
         with torch.no_grad():
@@ -68,6 +66,7 @@ class DDPGAgent:
         critic_loss = F.mse_loss(y, q)
         self.q_optimizer.zero_grad()
         critic_loss.backward()
+        nn.utils.clip_grad_norm_(self.q_local.parameters(), self.grad_clip)
         self.q_optimizer.step()
 
         # Update the actor.
@@ -75,6 +74,7 @@ class DDPGAgent:
         policy_loss = -self.q_local(torch.cat((states, predicted_actions), 1)).mean()
         self.mu_optimizer.zero_grad()
         policy_loss.backward()
+        nn.utils.clip_grad_norm_(self.mu_local.parameters(), self.grad_clip)
         self.mu_optimizer.step()
 
         # Soft update the target networks.
@@ -87,3 +87,10 @@ class DDPGAgent:
             dst_param.detach_()
             dst_param.data.copy_(
                 self.tau * src_param.data + (1.0 - self.tau) * dst_param.data)
+
+    def save_model(self, model_dir):
+        torch.save(self.q_local.state_dict(), model_dir + '/q_local.pt')
+        torch.save(self.q_target.state_dict(), model_dir + '/q_target.pt')
+        torch.save(self.mu_local.state_dict(), model_dir + '/mu_local.pt')
+        torch.save(self.mu_target.state_dict(), model_dir + '/mu_target.pt')
+        

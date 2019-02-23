@@ -3,7 +3,7 @@ from collections import deque, namedtuple
 import copy, time, random, json, os
 import torch
 import torch.nn as nn
-from tensorboardX import SummaryWriter
+import pickle
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -61,11 +61,13 @@ class RLTrainingLogger:
     """
     A helper class that logs the rewards and running time of training process.
     """
-    def __init__(self, window_size=100):
+    def __init__(self, window_size=100, log_file=None, log_interval=50):
         self.reward_log = SmoothAccumulator(window_size)
         self.time_log = SmoothAccumulator(window_size)
         self._episode_count = 0
         self._start_timestamp = None
+        self._log_file = log_file
+        self._log_interval = log_interval
 
     def episode_begin(self):
         self._start_timestamp = time.time()
@@ -80,11 +82,14 @@ class RLTrainingLogger:
         t, smooth_t = self.time_log.get_latest_record()
         print('\rEpisode %4d: reward = %.3f (%.3f), time = %.2fs (%.2fs)' %
               (self._episode_count, r, smooth_r, t, smooth_t), end='')
-        if self._episode_count % 20 == 0:
+        if self._episode_count % self._log_interval == 0:
             print('')
+            if self._log_file:
+                with open(self._log_file, 'wb') as f:
+                    pickle.dump(self, f)
 
-    def get_smooth_rewards(self):
-        return self.reward_log.get_all_records()[1]
+    def get_all_rewards(self):
+        return self.reward_log.get_all_records()
 
 
 class ReplayBuffer:
@@ -161,7 +166,7 @@ class OUNoise:
         return self.state * self.coef
 
 
-def Train(env, agent, config):
+def TrainDDPG(env, agent, config):
     
     # Copy the configs.
     action_repeat = config['action_repeat']
@@ -177,45 +182,47 @@ def Train(env, agent, config):
     
     # Prepare the utilities.
     os.makedirs(config['model_dir'], exist_ok=True)
-    os.makedirs(config['log_dir'], exist_ok=True)
-    # tf_logger = SummaryWriter(log_dir=log_dir)/
-    
-    
     buffer = ReplayBuffer(config['buffer_size'], batch_num, seed)
     noise = OUNoise(action_size, seed, discount=config['noise_discount'])
-    logger = RLTrainingLogger(config['window_size'])
+    logger = RLTrainingLogger(config['window_size'], config['log_file'], config['log_interval'])
     
     # The main training process.
     total_step_num = 0
     total_episode_num = 0
     
-    get_repeated_state = lambda states: np.concatenate(states[-1 - action_repeat:-1], 1)
-    get_repeated_next_state = lambda states: np.concatenate(states[-action_repeat:], 1)
+    get_last_repeated_state = lambda states: np.concatenate(states[-action_repeat:], 1)
+    
+    best_performance = None
     
     while total_step_num < max_step_num and total_episode_num < max_episode_num:
         # Start an episode
-        state = env.reset()
+        raw_state = env.reset()
         done = False
         logger.episode_begin()
-        episode_states = [state for _ in range(action_repeat)]
+        state = np.concatenate([raw_state for _ in range(action_repeat)], 1)
         episode_rewards = []
         while not done:
-            action = agent.act(get_repeated_next_state(episode_states))
+            action = agent.act(state)
             action += noise.sample()
             action = np.clip(action, a_min=out_low, a_max=out_high)
+            states = []
             for _ in range(action_repeat):
-                next_state, reward, done = env.step(action)
+                next_raw_state, reward, done = env.step(action)
                 total_step_num += 1
-                episode_states.append(next_state)
+                states.append(next_raw_state)
                 episode_rewards.append(reward)
             # print('Interacting: next_state.shape =', next_state.shape)
-            buffer.add(
-                get_repeated_state(episode_states),
-                action,
-                sum(episode_rewards[-action_repeat:]),
-                get_repeated_next_state(episode_states),
-                done)
+            next_state = np.concatenate(states, 1)
+            buffer.add(state, action, sum(episode_rewards[-action_repeat:]), next_state, done)
+            state = next_state
             if len(buffer) > batch_num and total_step_num % learn_interval == 0:
                 agent.learn(buffer.sample())
         logger.episode_end(sum(episode_rewards))
         total_episode_num += 1
+        
+        # Save the model as long as its recent smoothed reward is higher than
+        # the previous best performance by some margin.
+        smooth_performance = logger.reward_log.get_latest_record()[1]
+        if best_performance is None or smooth_performance > best_performance + .5:
+            agent.save_model(config.get('model_dir'))
+            best_performance = smooth_performance
